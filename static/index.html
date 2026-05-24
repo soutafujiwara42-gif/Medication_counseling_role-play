@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>服薬指導ロープレ練習</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────── -->
+<header id="header">
+  <h1>服薬指導ロープレ練習
+    <span>薬剤師向けトレーニング</span>
+  </h1>
+  <div id="model-badge">
+    <span id="model-name">読込中…</span>
+  </div>
+</header>
+
+<!-- ── Main ───────────────────────────────────────────────────── -->
+<div id="main">
+
+  <!-- ── Left Panel ──────────────────────────────────────────── -->
+  <aside id="left-panel">
+
+    <!-- Personality -->
+    <div class="panel-section">
+      <div class="panel-label">患者の性格</div>
+      <div id="personality-tabs">
+        <button class="personality-btn active" data-personality="talkative">
+          <span class="icon">😄</span>
+          <span class="label">話好き</span>
+        </button>
+        <button class="personality-btn" data-personality="quiet">
+          <span class="icon">🤫</span>
+          <span class="label">無口</span>
+        </button>
+        <button class="personality-btn" data-personality="proxy">
+          <span class="icon">👨‍👩‍👧</span>
+          <span class="label">代理</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Voice Options -->
+    <div class="panel-section">
+      <div class="panel-label">音声設定</div>
+      <div id="voice-options">
+        <div class="toggle-row">
+          <div class="toggle on" id="voice-out-toggle" title="音声出力ON/OFF"></div>
+          <span>音声出力</span>
+        </div>
+        <div class="toggle-row">
+          <div class="toggle on" id="voice-in-toggle" title="音声入力ON/OFF"></div>
+          <span>音声入力</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prescription -->
+    <div id="prescription-section">
+      <div class="panel-label">処方薬登録</div>
+      <div class="search-row">
+        <input
+          type="text"
+          id="drug-search-input"
+          placeholder="品名を入力して検索…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <div id="drug-search-results"></div>
+
+      <div class="prescription-list-label">処方薬リスト</div>
+      <div id="prescription-list"></div>
+      <div id="prescription-empty">処方薬が登録されていません。<br/>上の検索欄から薬を追加してください。</div>
+    </div>
+
+  </aside>
+
+  <!-- ── Right Panel (Chat) ──────────────────────────────────── -->
+  <section id="right-panel">
+
+    <!-- Avatar strip -->
+    <div id="avatar-strip">
+      <div id="avatar-canvas-wrap">
+        <canvas id="avatar-canvas" width="150" height="180"></canvas>
+        <div id="avatar-status-ring" class="idle"></div>
+      </div>
+      <div id="avatar-info">
+        <div id="avatar-name">患者（模擬）</div>
+        <div id="avatar-status-text">待機中</div>
+      </div>
+      <span id="personality-display">話好き</span>
+      <button id="reset-btn" title="会話をリセット">⟳ リセット</button>
+    </div>
+
+    <!-- Messages -->
+    <div id="chat-messages"></div>
+
+    <!-- Input bar -->
+    <div id="input-bar">
+      <button id="voice-btn" class="input-btn" title="音声入力">🎤</button>
+      <textarea
+        id="msg-input"
+        rows="1"
+        placeholder="薬剤師として服薬指導の言葉を入力… (Enter で送信)"
+      ></textarea>
+      <button id="send-btn" class="input-btn" title="送信">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="22" y1="2" x2="11" y2="13"></line>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+        </svg>
+      </button>
+    </div>
+
+  </section>
+</div>
+
+<script src="/js/avatar.js"></script>
+<script src="/js/voice.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
