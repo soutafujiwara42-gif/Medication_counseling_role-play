@@ -61,16 +61,19 @@ class VoiceManager {
   // while the network request is in flight.
   unlockAudio() {
     if (!this.synth || !this.voiceOutput) return;
-    // Cancel any stale keep-alive first
-    this.synth.cancel();
-    const u = new SpeechSynthesisUtterance('あ'.repeat(80));
+    // Do NOT call synth.cancel() before speak() – even in gesture context,
+    // cancel() → speak() in the same call stack is rejected by iOS.
+    const u = new SpeechSynthesisUtterance('あいうえおかきくけこさしすせそ'.repeat(6));
     u.volume = 0.01;
     u.rate   = 0.1;   // ~30 seconds – well beyond any network round-trip
     u.lang   = 'ja-JP';
-    if (this._jaVoice) u.voice = this._jaVoice;
+    // Don't set a specific voice: a named voice that isn't fully loaded
+    // can cause silent rejection on iOS.
     this._keepAliveUtterance = u;
     this.synth.speak(u);
-    console.log('[Voice] keep-alive started, synth.speaking=', this.synth.speaking, 'pending=', this.synth.pending);
+    console.log('[Voice] keep-alive queued, speaking=', this.synth.speaking, 'pending=', this.synth.pending);
+    setTimeout(() => console.log('[Voice] keep-alive +500ms: speaking=', this.synth.speaking, 'pending=', this.synth.pending), 500);
+    setTimeout(() => console.log('[Voice] keep-alive +1500ms: speaking=', this.synth.speaking, 'pending=', this.synth.pending), 1500);
   }
 
   // ── STT ─────────────────────────────────────────────────────────────────────
@@ -150,11 +153,12 @@ class VoiceManager {
         console.log('[Voice] speak() starting utterance, speaking=', this.synth.speaking, 'pending=', this.synth.pending);
 
         this._ttsTimer = setInterval(() => {
+          console.log('[Voice] wd: speaking=', this.synth.speaking, 'paused=', this.synth.paused, 'pending=', this.synth.pending);
           if (this.synth && this.synth.paused) {
-            console.log('[Voice] watchdog: resuming paused synth');
+            console.log('[Voice] watchdog: resuming');
             this.synth.resume();
           }
-        }, 250);
+        }, 1000);
 
         setTimeout(done, Math.max(text.length * 120, 8000));
 
@@ -173,12 +177,17 @@ class VoiceManager {
       };
 
       if (this._keepAliveUtterance) {
-        // Keep-alive is (or was) running – cancel it now so the session is
-        // still considered "active", then speak after a short settle delay.
-        console.log('[Voice] cancelling keep-alive, speaking=', this.synth.speaking);
+        console.log('[Voice] cancel keep-alive: speaking=', this.synth.speaking, 'pending=', this.synth.pending);
         this._keepAliveUtterance = null;
-        this.synth.cancel();
-        setTimeout(startUtterance, 150);
+        if (this.synth.speaking || this.synth.pending) {
+          // Session is active – safe to cancel then speak
+          this.synth.cancel();
+          setTimeout(startUtterance, 150);
+        } else {
+          // Keep-alive never started (iOS rejected it) – try speaking directly
+          console.log('[Voice] keep-alive was idle, calling speak() directly');
+          startUtterance();
+        }
       } else if (this.synth.speaking || this.synth.pending) {
         this.synth.cancel();
         setTimeout(startUtterance, 150);
