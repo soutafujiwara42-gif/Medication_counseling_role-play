@@ -178,34 +178,43 @@ async def chat(req: ChatRequest):
     try:
         response = client.messages.create(
             model=MODEL_ID,
-            max_tokens=512,
+            max_tokens=200,
             system=system_prompt,
             messages=messages,
         )
-        reply = response.content[0].text
-
-        # Generate TTS audio with edge-tts (server-side, works on iOS Safari)
-        audio_b64: Optional[str] = None
-        try:
-            communicate = edge_tts.Communicate(reply, "ja-JP-NanamiNeural")
-            buf = io.BytesIO()
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    buf.write(chunk["data"])
-            if buf.tell() > 0:
-                audio_b64 = base64.b64encode(buf.getvalue()).decode()
-        except Exception as tts_err:
-            logger.warning(f"edge-tts エラー（音声なしで続行）: {tts_err}")
-
         return {
-            "reply": reply,
-            "audio": audio_b64,
+            "reply": response.content[0].text,
             "model": MODEL_ID,
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
         }
     except Exception as e:
         logger.error(f"Claude API エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── API: TTS ─────────────────────────────────────────────────────────────────
+
+class TTSRequest(BaseModel):
+    text: str
+
+@app.post("/api/tts")
+async def tts(req: TTSRequest):
+    if not req.text:
+        raise HTTPException(status_code=400, detail="text is required")
+    try:
+        communicate = edge_tts.Communicate(req.text, "ja-JP-NanamiNeural")
+        buf = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                buf.write(chunk["data"])
+        if buf.tell() == 0:
+            raise HTTPException(status_code=500, detail="TTS produced no audio")
+        return {"audio": base64.b64encode(buf.getvalue()).decode()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"edge-tts エラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

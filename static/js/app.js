@@ -317,10 +317,27 @@ async function sendMessage() {
     typingEl.remove();
     state.history.push({ role: 'user',      content: text });
     state.history.push({ role: 'assistant', content: reply });
+    // Show text immediately – don't wait for TTS
     addMessage('patient', reply);
-    if (voice.voiceOutput && data.audio) await voice.speakAudio(data.audio);
-    else setAvatarState('idle');
-    // Auto-restart mic after response if voice input is enabled
+
+    if (voice.voiceOutput) {
+      // Fetch TTS audio in parallel (user already sees text)
+      try {
+        const ttsRes = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: reply }),
+        });
+        if (ttsRes.ok) {
+          const ttsData = await ttsRes.json();
+          await voice.speakAudio(ttsData.audio);
+        }
+      } catch (ttsErr) {
+        console.warn('TTS fetch error:', ttsErr);
+      }
+    } else {
+      setAvatarState('idle');
+    }
     autoListen = voice.voiceInput && voice.available;
   } catch (err) {
     typingEl.remove();
