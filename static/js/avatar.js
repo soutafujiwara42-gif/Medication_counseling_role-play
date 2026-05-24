@@ -1,6 +1,6 @@
 /**
- * PatientAvatar – Canvas animated realistic patient face.
- * Draw order: background → glow → neck/shoulders → back-hair → face → front-fringe → features
+ * PatientAvatar – Shiba Inu patient face, canvas-animated.
+ * States: idle | listening | speaking | thinking
  */
 class PatientAvatar {
   constructor(canvasId) {
@@ -13,15 +13,19 @@ class PatientAvatar {
     this.state  = 'idle';
     this.frame  = 0;
 
-    this.eyeOpen   = 1.0;
+    // Blink
+    this.eyeOpen    = 1.0;
     this.blinkTimer = 0;
-    this.nextBlink  = 150 + Math.random() * 100;
+    this.nextBlink  = 150 + Math.random() * 120;
 
+    // Mouth
     this.mouthOpen  = 0;
     this.mouthPhase = 0;
 
+    // Micro-movement
     this.breathPhase = 0;
     this.headTilt    = 0;
+    this.earWiggle   = 0;
 
     this._run();
   }
@@ -34,7 +38,7 @@ class PatientAvatar {
   }
 
   _update() {
-    this.breathPhase += 0.018;
+    this.breathPhase += 0.016;
 
     // Blink
     this.blinkTimer++;
@@ -42,278 +46,310 @@ class PatientAvatar {
       const rel = this.blinkTimer - this.nextBlink;
       if      (rel < 4) this.eyeOpen = Math.max(0, 1 - rel / 2);
       else if (rel < 7) this.eyeOpen = Math.min(1, (rel - 4) / 3);
-      else { this.eyeOpen = 1; this.blinkTimer = 0; this.nextBlink = 120 + Math.random() * 160; }
+      else { this.eyeOpen = 1; this.blinkTimer = 0; this.nextBlink = 110 + Math.random() * 140; }
     }
 
-    // Mouth
+    // Mouth (speaking animation)
     if (this.state === 'speaking') {
-      this.mouthPhase += 0.25;
-      this.mouthOpen = Math.max(0.05, Math.min(0.95,
-        0.25 + Math.sin(this.mouthPhase) * 0.28 + Math.cos(this.mouthPhase * 1.6) * 0.12));
+      this.mouthPhase += 0.22;
+      this.mouthOpen = Math.max(0.05, Math.min(1,
+        0.3 + Math.sin(this.mouthPhase) * 0.3 + Math.cos(this.mouthPhase * 1.7) * 0.15));
     } else {
-      this.mouthOpen = Math.max(0, this.mouthOpen - 0.06);
+      this.mouthOpen = Math.max(0, this.mouthOpen - 0.05);
     }
 
-    // Head tilt
-    if (this.state === 'listening') this.headTilt = Math.sin(this.frame * 0.022) * 0.035;
-    else this.headTilt *= 0.93;
+    // Head tilt when listening
+    if (this.state === 'listening') {
+      this.headTilt = Math.sin(this.frame * 0.025) * 0.08; // Shiba inquisitive head tilt!
+    } else {
+      this.headTilt *= 0.9;
+    }
+
+    // Ear wiggle when thinking
+    this.earWiggle = this.state === 'thinking'
+      ? Math.sin(this.frame * 0.15) * 3
+      : this.earWiggle * 0.85;
   }
 
   _draw() {
     const { ctx, w, h, cx } = this;
-    const by = Math.sin(this.breathPhase) * 1.2;
+    const by = Math.sin(this.breathPhase) * 1.0;
 
     ctx.clearRect(0, 0, w, h);
 
     // Background
     const bg = ctx.createLinearGradient(0, 0, 0, h);
-    bg.addColorStop(0, '#dbeafe'); bg.addColorStop(1, '#bfdbfe');
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+    bg.addColorStop(0, '#fff7ed');
+    bg.addColorStop(1, '#fed7aa');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
 
-    // State glow (behind everything)
+    // State glow (behind face)
     this._drawGlow(ctx, cx, h, by);
 
-    // Head tilt pivot
+    // Head tilt
     ctx.save();
-    ctx.translate(cx, h * 0.44 + by);
+    ctx.translate(cx, h * 0.46 + by);
     ctx.rotate(this.headTilt);
-    ctx.translate(-cx, -(h * 0.44 + by));
+    ctx.translate(-cx, -(h * 0.46 + by));
 
-    // Neck
-    ctx.fillStyle = '#e8a870';
+    // Neck fluff
+    ctx.fillStyle = '#e8c090';
     ctx.beginPath();
-    ctx.roundRect(cx - 16, h * 0.70 + by, 32, h * 0.22, [0, 0, 4, 4]);
+    ctx.ellipse(cx, h * 0.78 + by, 32, 20, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // White coat shoulders
-    const coat = ctx.createLinearGradient(0, h * 0.80 + by, 0, h);
-    coat.addColorStop(0, '#e8f0ff'); coat.addColorStop(1, '#c0d0f0');
-    ctx.fillStyle = coat;
-    ctx.beginPath();
-    ctx.moveTo(0, h); ctx.lineTo(0, h * 0.88 + by);
-    ctx.bezierCurveTo(w * 0.1, h * 0.77 + by, cx - 38, h * 0.77 + by, cx - 16, h * 0.74 + by);
-    ctx.lineTo(cx + 16, h * 0.74 + by);
-    ctx.bezierCurveTo(cx + 38, h * 0.77 + by, w * 0.9, h * 0.77 + by, w, h * 0.88 + by);
-    ctx.lineTo(w, h); ctx.closePath(); ctx.fill();
+    // Ears (behind head)
+    this._drawEars(ctx, cx, h, by);
 
-    // Collar white shirt
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.moveTo(cx - 10, h * 0.74 + by);
-    ctx.lineTo(cx - 3, h * 0.90 + by);
-    ctx.lineTo(cx + 3, h * 0.90 + by);
-    ctx.lineTo(cx + 10, h * 0.74 + by);
-    ctx.closePath(); ctx.fill();
+    // Main head (orange-tan Shiba)
+    this._drawHead(ctx, cx, h, by);
 
-    // ── BACK HAIR (before face) ─────────────────────────────────────────────
-    this._drawHairBack(ctx, cx, h, by);
-
-    // Face
-    this._drawFace(ctx, cx, h, by);
-
-    // Ears
-    for (const s of [-1, 1]) {
-      ctx.fillStyle = '#e8a870';
-      ctx.beginPath(); ctx.ellipse(cx + s * 56, h * 0.41 + by, 7, 11, s * 0.12, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#c87840';
-      ctx.beginPath(); ctx.ellipse(cx + s * 57, h * 0.41 + by, 3, 6, s * 0.12, 0, Math.PI * 2); ctx.fill();
-    }
-
-    // ── FRONT FRINGE (after face) ───────────────────────────────────────────
-    this._drawHairFront(ctx, cx, h, by);
-
-    // Eyebrows
-    this._drawEyebrows(ctx, cx, h, by);
+    // Forehead cream marking
+    this._drawForeheadMark(ctx, cx, h, by);
 
     // Eyes
     this._drawEyes(ctx, cx, h, by);
 
-    // Nose
-    this._drawNose(ctx, cx, h, by);
+    // Snout + nose + mouth
+    this._drawSnout(ctx, cx, h, by);
 
-    // Mouth
-    this._drawMouth(ctx, cx, h, by);
-
-    // Cheeks
-    ctx.fillStyle = 'rgba(230,110,90,.13)';
+    // Cheek puffs
+    ctx.fillStyle = 'rgba(255, 220, 180, 0.5)';
     for (const s of [-1, 1]) {
-      ctx.beginPath(); ctx.ellipse(cx + s * 37, h * 0.50 + by, 14, 8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(cx + s * 40, h * 0.52 + by, 16, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     ctx.restore();
   }
 
-  _drawHairBack(ctx, cx, h, by) {
-    // Dark brown back hair – drawn BEFORE face so face sits on top
-    ctx.fillStyle = '#3a1f0d';
+  _drawEars(ctx, cx, h, by) {
+    const ew = this.earWiggle;
 
-    // Top cap (larger than face oval)
-    ctx.beginPath();
-    ctx.ellipse(cx, h * 0.31 + by, 60, 54, 0, Math.PI, 0, true);
-    ctx.fill();
-
-    // Side hair bands
     for (const s of [-1, 1]) {
+      // Outer ear (orange)
+      ctx.fillStyle = '#cc5500';
       ctx.beginPath();
-      ctx.moveTo(cx + s * 55, h * 0.34 + by);
-      ctx.bezierCurveTo(cx + s * 72, h * 0.48 + by, cx + s * 70, h * 0.60 + by, cx + s * 52, h * 0.68 + by);
-      ctx.lineTo(cx + s * 42, h * 0.68 + by);
-      ctx.bezierCurveTo(cx + s * 58, h * 0.58 + by, cx + s * 60, h * 0.46 + by, cx + s * 50, h * 0.34 + by);
-      ctx.closePath(); ctx.fill();
+      ctx.moveTo(cx + s * 20, h * 0.22 + by);
+      ctx.lineTo(cx + s * (58 + ew * s), h * 0.04 + by);
+      ctx.lineTo(cx + s * 62, h * 0.30 + by);
+      ctx.closePath();
+      ctx.fill();
+
+      // Inner ear (pink)
+      ctx.fillStyle = '#f4a0b0';
+      ctx.beginPath();
+      ctx.moveTo(cx + s * 24, h * 0.24 + by);
+      ctx.lineTo(cx + s * (54 + ew * s), h * 0.10 + by);
+      ctx.lineTo(cx + s * 56, h * 0.28 + by);
+      ctx.closePath();
+      ctx.fill();
     }
   }
 
-  _drawHairFront(ctx, cx, h, by) {
-    // Front fringe / hairline – sits OVER the very top of the face only
-    ctx.fillStyle = '#3a1f0d';
-
-    // Top forehead band
+  _drawHead(ctx, cx, h, by) {
+    // Main orange head
+    const headGrad = ctx.createRadialGradient(cx - 10, h * 0.34 + by, 0, cx, h * 0.42 + by, 70);
+    headGrad.addColorStop(0,   '#f08030');
+    headGrad.addColorStop(0.5, '#e06820');
+    headGrad.addColorStop(1,   '#c04810');
+    ctx.fillStyle = headGrad;
     ctx.beginPath();
-    ctx.moveTo(cx - 52, h * 0.295 + by);
-    ctx.bezierCurveTo(cx - 38, h * 0.245 + by, cx - 15, h * 0.225 + by, cx, h * 0.225 + by);
-    ctx.bezierCurveTo(cx + 15, h * 0.225 + by, cx + 38, h * 0.245 + by, cx + 52, h * 0.295 + by);
-    ctx.bezierCurveTo(cx + 42, h * 0.305 + by, cx + 22, h * 0.285 + by, cx, h * 0.285 + by);
-    ctx.bezierCurveTo(cx - 22, h * 0.285 + by, cx - 42, h * 0.305 + by, cx - 52, h * 0.295 + by);
-    ctx.closePath(); ctx.fill();
-
-    // Hair highlight
-    ctx.fillStyle = 'rgba(90,50,20,.2)';
-    ctx.beginPath();
-    ctx.ellipse(cx - 14, h * 0.255 + by, 22, 11, -0.2, 0, Math.PI * 2);
+    ctx.ellipse(cx, h * 0.42 + by, 60, 66, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  _drawFace(ctx, cx, h, by) {
-    // Depth shadow
-    const sh = ctx.createRadialGradient(cx, h * 0.43 + by, 28, cx, h * 0.43 + by, 62);
-    sh.addColorStop(0, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(0,0,0,.07)');
-    ctx.fillStyle = sh;
-    ctx.beginPath(); ctx.ellipse(cx, h * 0.43 + by, 54, 66, 0, 0, Math.PI * 2); ctx.fill();
-
-    // Skin
-    const skin = ctx.createRadialGradient(cx - 6, h * 0.37 + by, 0, cx, h * 0.43 + by, 60);
-    skin.addColorStop(0, '#fde8c8'); skin.addColorStop(0.6, '#f5c994'); skin.addColorStop(1, '#dda060');
-    ctx.fillStyle = skin;
-    ctx.beginPath(); ctx.ellipse(cx, h * 0.43 + by, 54, 66, 0, 0, Math.PI * 2); ctx.fill();
-  }
-
-  _drawEyebrows(ctx, cx, h, by) {
-    const y0 = h * 0.335 + by;
-    const lift = (this.state === 'thinking' || this.state === 'listening') ? -2 : 0;
-    ctx.strokeStyle = '#3a1f0d'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
-    for (const s of [-1, 1]) {
-      ctx.beginPath();
-      ctx.moveTo(cx + s * 36, y0 + 2 + lift);
-      ctx.quadraticCurveTo(cx + s * 23, y0 - 5 + lift, cx + s * 14, y0 + 1 + lift);
-      ctx.stroke();
-    }
+  _drawForeheadMark(ctx, cx, h, by) {
+    // Cream/white Shiba forehead marking (inverted V shape)
+    ctx.fillStyle = 'rgba(255, 245, 220, 0.7)';
+    ctx.beginPath();
+    ctx.moveTo(cx - 22, h * 0.28 + by);
+    ctx.quadraticCurveTo(cx, h * 0.21 + by, cx + 22, h * 0.28 + by);
+    ctx.quadraticCurveTo(cx + 14, h * 0.34 + by, cx, h * 0.32 + by);
+    ctx.quadraticCurveTo(cx - 14, h * 0.34 + by, cx - 22, h * 0.28 + by);
+    ctx.closePath();
+    ctx.fill();
   }
 
   _drawEyes(ctx, cx, h, by) {
-    const ey = h * 0.395 + by;
-    const rx = 12, ry = 8;
+    const ey  = h * 0.39 + by;
+    const eo  = this.eyeOpen;
+
     for (const s of [-1, 1]) {
       const ex = cx + s * 22;
-      const eo = this.eyeOpen;
 
-      ctx.fillStyle = '#fefefe';
-      ctx.beginPath(); ctx.ellipse(ex, ey, rx, ry * eo, 0, 0, Math.PI * 2); ctx.fill();
+      // Eye white (tiny, Shiba eyes are mostly dark)
+      ctx.fillStyle = '#fff8ee';
+      ctx.beginPath();
+      ctx.ellipse(ex, ey, 11, 8.5 * eo, -s * 0.18, 0, Math.PI * 2);
+      ctx.fill();
 
-      const iris = ctx.createRadialGradient(ex - 1.5, ey - 1.5, 0, ex, ey, 6.5);
-      iris.addColorStop(0, '#8c5e3a'); iris.addColorStop(.45, '#5a3015'); iris.addColorStop(1, '#28100a');
+      // Dark iris (large – gives Shiba the characteristic dark eye look)
+      const iris = ctx.createRadialGradient(ex - 1, ey - 1, 0, ex, ey, 7);
+      iris.addColorStop(0,   '#3a1a00');
+      iris.addColorStop(0.6, '#1a0800');
+      iris.addColorStop(1,   '#000000');
       ctx.fillStyle = iris;
-      ctx.beginPath(); ctx.ellipse(ex, ey, 6.5, 6.5 * eo, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(ex, ey, 7, 7 * eo, -s * 0.18, 0, Math.PI * 2);
+      ctx.fill();
 
-      ctx.fillStyle = '#0d0500';
-      ctx.beginPath(); ctx.ellipse(ex, ey, 3.5, 3.5 * eo, 0, 0, Math.PI * 2); ctx.fill();
+      // Highlight
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+      ctx.beginPath();
+      ctx.ellipse(ex - 2.5, ey - 2.5, 2, 2 * eo, 0, 0, Math.PI * 2);
+      ctx.fill();
 
-      ctx.fillStyle = 'rgba(255,255,255,.82)';
-      ctx.beginPath(); ctx.ellipse(ex - 2.5, ey - 2, 2, 2 * eo, 0, 0, Math.PI * 2); ctx.fill();
+      // Secondary small highlight
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.beginPath();
+      ctx.ellipse(ex + 2, ey + 2, 1, 1 * eo, 0, 0, Math.PI * 2);
+      ctx.fill();
 
       // Eyelid cover during blink
-      ctx.fillStyle = '#f0bb88';
-      ctx.beginPath(); ctx.ellipse(ex, ey - ry * eo, rx, ry * (1 - eo) + .5, 0, 0, Math.PI * 2); ctx.fill();
-
-      ctx.strokeStyle = '#1a0800'; ctx.lineWidth = 1.4;
-      ctx.beginPath(); ctx.ellipse(ex, ey, rx, ry * eo, 0, Math.PI, 0, true); ctx.stroke();
-    }
-  }
-
-  _drawNose(ctx, cx, h, by) {
-    const ny = h * 0.475 + by;
-    ctx.strokeStyle = '#b87a48'; ctx.lineWidth = 1.3; ctx.lineCap = 'round';
-    for (const s of [-1, 1]) {
+      ctx.fillStyle = '#e06820';
       ctx.beginPath();
-      ctx.moveTo(cx + s * 1.5, h * 0.415 + by);
-      ctx.quadraticCurveTo(cx + s * 7, ny - 3, cx + s * 5, ny + 6);
+      ctx.ellipse(ex, ey - 8.5 * eo, 11, 8.5 * (1 - eo) + 0.5, -s * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Upper lid line
+      ctx.strokeStyle = '#2a0c00';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(ex, ey, 11, 8.5 * eo, -s * 0.18, Math.PI, 0, true);
+      ctx.stroke();
+
+      // Shiba "eyebrow" marking (cream arc above eye)
+      ctx.strokeStyle = 'rgba(255, 235, 190, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(ex - 11, ey - 7);
+      ctx.quadraticCurveTo(ex, ey - 14, ex + 11, ey - 7);
       ctx.stroke();
     }
-    ctx.beginPath();
-    ctx.moveTo(cx - 5, ny + 6);
-    ctx.quadraticCurveTo(cx, ny + 9, cx + 5, ny + 6);
-    ctx.stroke();
   }
 
-  _drawMouth(ctx, cx, h, by) {
-    const my = h * 0.572 + by;
-    const mw = 17;
+  _drawSnout(ctx, cx, h, by) {
+    const sy = h * 0.53 + by; // snout center y
+
+    // Cream/white snout oval
+    const snoutGrad = ctx.createRadialGradient(cx, sy - 4, 0, cx, sy, 26);
+    snoutGrad.addColorStop(0, '#fff8ee');
+    snoutGrad.addColorStop(0.7, '#f5e8d0');
+    snoutGrad.addColorStop(1, '#e8c090');
+    ctx.fillStyle = snoutGrad;
+    ctx.beginPath();
+    ctx.ellipse(cx, sy, 28, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Nose (large black with highlight)
+    const ny = sy - 8;
+    const noseGrad = ctx.createRadialGradient(cx - 3, ny - 3, 0, cx, ny, 9);
+    noseGrad.addColorStop(0, '#2a2a2a');
+    noseGrad.addColorStop(1, '#000');
+    ctx.fillStyle = noseGrad;
+    ctx.beginPath();
+    ctx.ellipse(cx, ny, 11, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Nose highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(cx - 3, ny - 2, 4, 2.5, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Mouth
+    this._drawMouth(ctx, cx, sy, by);
+  }
+
+  _drawMouth(ctx, cx, sy, by) {
+    const my = sy + 8;
     const mo = this.mouthOpen;
 
     if (mo > 0.06) {
-      // Interior
-      ctx.fillStyle = '#6a1828';
-      ctx.beginPath(); ctx.ellipse(cx, my + 4 * mo, mw * .85, 8 * mo, 0, 0, Math.PI * 2); ctx.fill();
+      // Open mouth – tongue visible
+      ctx.fillStyle = '#9b1a40';
+      ctx.beginPath();
+      ctx.ellipse(cx, my + 4 * mo, 16, 10 * mo, 0, 0, Math.PI * 2);
+      ctx.fill();
 
-      // Upper teeth
-      ctx.fillStyle = '#fffdf5';
-      ctx.beginPath(); ctx.roundRect(cx - mw * .6, my - .5, mw * 1.2, 5 * mo, 2); ctx.fill();
+      // Tongue (pink)
+      const tongue = ctx.createRadialGradient(cx, my + 8 * mo, 0, cx, my + 8 * mo, 10);
+      tongue.addColorStop(0, '#ff9ab0');
+      tongue.addColorStop(1, '#e06080');
+      ctx.fillStyle = tongue;
+      ctx.beginPath();
+      ctx.ellipse(cx, my + 9 * mo, 10, 8 * mo, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Tongue crease
+      ctx.strokeStyle = '#d04060';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx, my + 5 * mo);
+      ctx.lineTo(cx, my + 14 * mo);
+      ctx.stroke();
 
       // Upper lip
-      const ul = ctx.createLinearGradient(0, my - 8, 0, my);
-      ul.addColorStop(0, '#d87070'); ul.addColorStop(1, '#bf5050');
-      ctx.fillStyle = ul;
+      ctx.fillStyle = '#e8c090';
       ctx.beginPath();
-      ctx.moveTo(cx - mw, my);
-      ctx.bezierCurveTo(cx - mw*.6, my - 8, cx - mw*.1, my - 5, cx, my - 4);
-      ctx.bezierCurveTo(cx + mw*.1, my - 5, cx + mw*.6, my - 8, cx + mw, my);
-      ctx.bezierCurveTo(cx + mw*.35, my - 2, cx - mw*.35, my - 2, cx - mw, my);
-      ctx.closePath(); ctx.fill();
-
-      // Lower lip
-      const ll = ctx.createLinearGradient(0, my, 0, my + 10 * mo);
-      ll.addColorStop(0, '#cc6060'); ll.addColorStop(1, '#f0a0a0');
-      ctx.fillStyle = ll;
-      ctx.beginPath();
-      ctx.moveTo(cx - mw, my);
-      ctx.bezierCurveTo(cx - mw*.5, my + 10 * mo, cx + mw*.5, my + 10 * mo, cx + mw, my);
-      ctx.bezierCurveTo(cx + mw*.5, my + 7 * mo, cx - mw*.5, my + 7 * mo, cx - mw, my);
-      ctx.closePath(); ctx.fill();
+      ctx.moveTo(cx - 16, my);
+      ctx.quadraticCurveTo(cx - 8, my - 5, cx, my - 3);
+      ctx.quadraticCurveTo(cx + 8, my - 5, cx + 16, my);
+      ctx.quadraticCurveTo(cx + 8, my + 2, cx, my + 1);
+      ctx.quadraticCurveTo(cx - 8, my + 2, cx - 16, my);
+      ctx.closePath();
+      ctx.fill();
     } else {
-      // Closed – subtle smile
-      ctx.lineWidth = 2.2; ctx.lineCap = 'round';
-      ctx.strokeStyle = '#b85858';
+      // Shiba smile (closed mouth with characteristic curve)
+      ctx.strokeStyle = '#c05030';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+
+      // Center vertical line
       ctx.beginPath();
-      ctx.moveTo(cx - mw, my);
-      ctx.bezierCurveTo(cx - mw*.5, my - 6, cx + mw*.5, my - 6, cx + mw, my);
+      ctx.moveTo(cx, my - 3);
+      ctx.lineTo(cx, my + 2);
       ctx.stroke();
-      ctx.strokeStyle = '#e09090'; ctx.lineWidth = 1.8;
+
+      // Left curve (smile)
       ctx.beginPath();
-      ctx.moveTo(cx - mw, my);
-      ctx.bezierCurveTo(cx - mw*.5, my + 4, cx + mw*.5, my + 4, cx + mw, my);
+      ctx.moveTo(cx - 1, my + 1);
+      ctx.quadraticCurveTo(cx - 9, my + 2, cx - 15, my - 2);
+      ctx.stroke();
+
+      // Right curve (smile)
+      ctx.beginPath();
+      ctx.moveTo(cx + 1, my + 1);
+      ctx.quadraticCurveTo(cx + 9, my + 2, cx + 15, my - 2);
       ctx.stroke();
     }
   }
 
   _drawGlow(ctx, cx, h, by) {
     if (this.state === 'idle') return;
-    const colors = { listening:'rgba(59,130,246,.3)', speaking:'rgba(16,185,129,.3)', thinking:'rgba(245,158,11,.3)' };
-    const col = colors[this.state]; if (!col) return;
+    const colors = {
+      listening: 'rgba(59,130,246,.35)',
+      speaking:  'rgba(16,185,129,.35)',
+      thinking:  'rgba(245,158,11,.35)',
+    };
+    const col = colors[this.state];
+    if (!col) return;
+
     let r;
-    if (this.state === 'speaking') r = 68 + Math.abs(Math.sin(this.mouthPhase)) * 10;
-    else r = 68 + Math.sin(this.frame * 0.06) * 7;
-    const g = ctx.createRadialGradient(cx, h * .44 + by, r * .5, cx, h * .44 + by, r + 18);
-    g.addColorStop(0, 'transparent'); g.addColorStop(1, col);
+    if (this.state === 'speaking')  r = 72 + Math.abs(Math.sin(this.mouthPhase)) * 12;
+    else if (this.state === 'thinking') r = 72 + Math.sin(this.frame * 0.08) * 8;
+    else r = 72 + Math.sin(this.frame * 0.05) * 8;
+
+    const g = ctx.createRadialGradient(cx, h * .46 + by, r * .4, cx, h * .46 + by, r + 22);
+    g.addColorStop(0, 'transparent');
+    g.addColorStop(1, col);
     ctx.fillStyle = g;
-    ctx.beginPath(); ctx.ellipse(cx, h * .44 + by, r + 18, r + 18, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx, h * .46 + by, r + 22, r + 22, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
