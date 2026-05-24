@@ -129,7 +129,7 @@ class VoiceManager {
 
     return new Promise((resolve) => {
       const gain = this._audioCtx.createGain();
-      gain.gain.value = 1.5;          // amplify edge-tts output for iOS
+      gain.gain.value = 0.75;         // amplify edge-tts output for iOS
 
       const source = this._audioCtx.createBufferSource();
       source.buffer = audioBuffer;
