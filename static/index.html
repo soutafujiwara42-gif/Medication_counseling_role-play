@@ -24,6 +24,22 @@
   <!-- ── Left Panel ──────────────────────────────────────────── -->
   <aside id="left-panel">
 
+    <!-- Preset Management -->
+    <div class="panel-section">
+      <div class="panel-label">プリセット</div>
+      <div class="preset-row">
+        <select id="preset-select">
+          <option value="">── プリセットを選択 ──</option>
+        </select>
+        <button id="preset-load-btn" class="preset-btn" title="読み込み">読込</button>
+        <button id="preset-delete-btn" class="preset-btn danger" title="削除">削除</button>
+      </div>
+      <div class="preset-save-row">
+        <input type="text" id="preset-name-input" placeholder="プリセット名を入力…" />
+        <button id="preset-save-btn" class="preset-btn primary">保存</button>
+      </div>
+    </div>
+
     <!-- Personality -->
     <div class="panel-section">
       <div class="panel-label">患者の性格</div>
@@ -40,6 +56,43 @@
           <span class="icon">👨‍👩‍👧</span>
           <span class="label">代理</span>
         </button>
+      </div>
+    </div>
+
+    <!-- Patient Background -->
+    <div class="panel-section">
+      <div class="panel-label-row">
+        <span class="panel-label" style="margin-bottom:0">患者背景</span>
+        <button class="collapse-btn" id="bg-collapse-btn" title="折りたたむ">▲</button>
+      </div>
+      <div id="patient-bg-form">
+        <div class="bg-row">
+          <label>年齢</label>
+          <input type="text" id="bg-age" placeholder="例: 65歳" />
+          <label>性別</label>
+          <select id="bg-gender">
+            <option value="">-</option>
+            <option value="男性">男性</option>
+            <option value="女性">女性</option>
+            <option value="その他">その他</option>
+          </select>
+        </div>
+        <div class="bg-field">
+          <label>主訴 / 来局目的</label>
+          <input type="text" id="bg-complaint" placeholder="例: 高血圧・糖尿病で通院中" />
+        </div>
+        <div class="bg-field">
+          <label>既往歴・合併症</label>
+          <input type="text" id="bg-history" placeholder="例: 心筋梗塞、慢性腎不全" />
+        </div>
+        <div class="bg-field">
+          <label>アレルギー・禁忌</label>
+          <input type="text" id="bg-allergies" placeholder="例: ペニシリン系アレルギー" />
+        </div>
+        <div class="bg-field">
+          <label>その他（生活習慣など）</label>
+          <input type="text" id="bg-notes" placeholder="例: 独居、飲酒習慣あり" />
+        </div>
       </div>
     </div>
 

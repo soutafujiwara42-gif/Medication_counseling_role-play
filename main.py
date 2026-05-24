@@ -119,11 +119,21 @@ class Message(BaseModel):
     content: str
 
 
+class PatientBackground(BaseModel):
+    age: str = ""
+    gender: str = ""
+    chief_complaint: str = ""
+    medical_history: str = ""
+    allergies: str = ""
+    notes: str = ""
+
+
 class ChatRequest(BaseModel):
     message: str
     prescription: List[str] = []
     personality: str = "talkative"
     history: List[Message] = []
+    patient_background: PatientBackground = PatientBackground()
 
 
 @app.post("/api/chat")
@@ -136,11 +146,23 @@ def chat(req: ChatRequest):
     else:
         presc_section = "\n\n【今回の処方薬】\n  （未登録）"
 
+    bg = req.patient_background
+    bg_parts = []
+    if bg.age:             bg_parts.append(f"  年齢: {bg.age}")
+    if bg.gender:          bg_parts.append(f"  性別: {bg.gender}")
+    if bg.chief_complaint: bg_parts.append(f"  主訴: {bg.chief_complaint}")
+    if bg.medical_history: bg_parts.append(f"  既往歴: {bg.medical_history}")
+    if bg.allergies:       bg_parts.append(f"  アレルギー: {bg.allergies}")
+    if bg.notes:           bg_parts.append(f"  備考: {bg.notes}")
+    bg_section = ("\n\n【患者背景】\n" + "\n".join(bg_parts)) if bg_parts else ""
+
     system_prompt = (
         f"{personality_prompt}"
-        f"{presc_section}\n\n"
+        f"{presc_section}"
+        f"{bg_section}\n\n"
         "【共通ルール】\n"
         "- 完全に患者として振る舞い、AIであることを絶対に明かさない\n"
+        "- 患者背景・処方薬の情報を自然に会話に盛り込む\n"
         "- 自然な日本語口語で、リアルな患者らしい反応をする\n"
         "- 処方薬に関連した自然な懸念・質問・体験談を織り交ぜる\n"
         "- 絵文字・記号・箇条書きは使わない\n"

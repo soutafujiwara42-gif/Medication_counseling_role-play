@@ -472,7 +472,112 @@ body {
   50% { transform: scale(1.1); }
 }
 
-/* Reset btn */
+/* ── Preset ───────────────────────────────────── */
+.preset-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+.preset-row select {
+  flex: 1;
+  border: 1.5px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--surface2);
+  color: var(--text);
+  outline: none;
+}
+.preset-save-row {
+  display: flex;
+  gap: 6px;
+}
+.preset-save-row input {
+  flex: 1;
+  border: 1.5px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color .15s;
+}
+.preset-save-row input:focus { border-color: var(--primary); }
+.preset-btn {
+  border: 1.5px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--surface2);
+  color: var(--text-muted);
+  transition: all .15s;
+  white-space: nowrap;
+}
+.preset-btn:hover { background: var(--border); }
+.preset-btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.preset-btn.primary:hover { background: var(--primary-dark); }
+.preset-btn.danger:hover { background: #fee2e2; color: var(--danger); border-color: var(--danger); }
+
+/* ── Patient Background ───────────────────────── */
+.panel-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.collapse-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  transition: color .15s;
+}
+.collapse-btn:hover { color: var(--text); }
+
+#patient-bg-form { display: flex; flex-direction: column; gap: 7px; }
+#patient-bg-form.collapsed { display: none; }
+
+.bg-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  gap: 6px;
+  align-items: center;
+}
+.bg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+#patient-bg-form label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+#patient-bg-form input,
+#patient-bg-form select {
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  background: var(--surface2);
+  transition: border-color .15s;
+}
+#patient-bg-form input:focus,
+#patient-bg-form select:focus { border-color: var(--primary); background: var(--surface); }
+#patient-bg-form input::placeholder { color: var(--text-light); }
+
+/* ── Reset btn ────────────────────────────────── */
 #reset-btn {
   background: #fff7ed;
   border: 1.5px solid #fed7aa;
