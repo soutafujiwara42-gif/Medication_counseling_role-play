@@ -169,5 +169,41 @@
 
 <script src="/js/voice.js"></script>
 <script src="/js/app.js"></script>
+
+<!-- Debug panel: visible only when URL contains ?debug -->
+<script>
+(function() {
+  if (!location.search.includes('debug')) return;
+  const panel = document.createElement('div');
+  panel.id = 'debug-panel';
+  panel.style.cssText = [
+    'position:fixed','bottom:0','left:0','right:0','max-height:35vh',
+    'overflow-y:auto','background:rgba(0,0,0,.85)','color:#0f0',
+    'font:11px/1.4 monospace','padding:6px 8px','z-index:9999',
+    'white-space:pre-wrap','word-break:break-all'
+  ].join(';');
+  document.body.appendChild(panel);
+
+  const orig = console.log.bind(console);
+  console.log = (...args) => {
+    orig(...args);
+    const line = document.createElement('div');
+    line.textContent = new Date().toLocaleTimeString('ja-JP') + ' ' + args.join(' ');
+    panel.appendChild(line);
+    panel.scrollTop = panel.scrollHeight;
+    if (panel.children.length > 80) panel.removeChild(panel.firstChild);
+  };
+  const origWarn = console.warn.bind(console);
+  console.warn = (...args) => {
+    origWarn(...args);
+    const line = document.createElement('div');
+    line.style.color = '#ff0';
+    line.textContent = '[WARN] ' + new Date().toLocaleTimeString('ja-JP') + ' ' + args.join(' ');
+    panel.appendChild(line);
+    panel.scrollTop = panel.scrollHeight;
+  };
+  console.log('[Debug] panel active');
+})();
+</script>
 </body>
 </html>
