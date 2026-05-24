@@ -140,7 +140,7 @@ class ChatRequest(BaseModel):
 
 
 @app.post("/api/chat")
-def chat(req: ChatRequest):
+async def chat(req: ChatRequest):
     personality_prompt = PERSONALITY_PROMPTS.get(req.personality, PERSONALITY_PROMPTS["talkative"])
 
     if req.prescription:
