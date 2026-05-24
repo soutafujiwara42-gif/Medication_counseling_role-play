@@ -306,6 +306,7 @@ async function sendMessage() {
     voice.synth.speak(unlock);
   }
 
+  let autoListen = false;
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -327,6 +328,8 @@ async function sendMessage() {
     addMessage('patient', reply);
     if (voice.voiceOutput) await voice.speak(reply);
     else setAvatarState('idle');
+    // Auto-restart mic after response if voice input is enabled
+    autoListen = voice.voiceInput && voice.available;
   } catch (err) {
     typingEl.remove();
     addSystemMessage(`エラーが発生しました: ${err.message}`);
@@ -334,7 +337,11 @@ async function sendMessage() {
   } finally {
     state.loading = false;
     sendBtn.disabled = false;
-    msgInput.focus();
+    if (!autoListen) msgInput.focus();
+  }
+  if (autoListen) {
+    // Small delay so iOS audio session fully closes before reopening mic
+    setTimeout(() => voice.startRecording(), 400);
   }
 }
 

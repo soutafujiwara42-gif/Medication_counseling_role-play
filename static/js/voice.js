@@ -1,16 +1,19 @@
 'use strict';
 /**
- * VoiceManager
- * Handles Web Speech API for STT and TTS, with iOS Safari workarounds:
- *  - SpeechRecognition is recreated each session (iOS reuse causes double-end events)
- *  - TTS watchdog resumes paused synthesis every 250ms (iOS silently pauses on bg/lock)
- *  - Hard timeout resolves the speak() Promise if synthesis hangs
- *  - 'aborted' STT error is silently ignored (iOS fires it before onend on stop())
+ * VoiceManager – Web Speech API wrapper with iOS Safari fixes.
+ *
+ * iOS quirks addressed:
+ *  - SpeechRecognition recreated each session (reuse causes double-end events)
+ *  - 'aborted' STT error ignored (iOS fires it before onend on stop())
+ *  - TTS watchdog calls synth.resume() every 250ms (iOS silently pauses on bg/lock)
+ *  - Hard timeout resolves speak() if onend never fires
+ *  - No sentence splitting: single utterance avoids inter-chunk gaps that
+ *    triggered false watchdog "done" between chunks
  */
 class VoiceManager {
   constructor() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    this._SR   = SR || null;
+    this._SR  = SR || null;
     this.synth = window.speechSynthesis;
 
     this.voiceInput  = true;
@@ -38,7 +41,7 @@ class VoiceManager {
       };
       pick();
       this.synth.onvoiceschanged = pick;
-      // iOS sometimes doesn't fire onvoiceschanged — retry
+      // iOS sometimes doesn't fire onvoiceschanged – retry
       setTimeout(pick, 500);
       setTimeout(pick, 2000);
     }
@@ -69,7 +72,7 @@ class VoiceManager {
       if (this._onEnd) this._onEnd();
     };
     r.onerror = (e) => {
-      // iOS fires 'aborted' before onend when stop() is called — ignore it
+      // iOS fires 'aborted' before onend when stop() is called – ignore
       if (e.error === 'aborted') return;
       console.warn('STT error:', e.error);
       this.isRecording = false;
@@ -86,7 +89,7 @@ class VoiceManager {
     try {
       this._recognition.start();
     } catch (e) {
-      console.warn('STT start error:', e);
+      console.warn('STT start:', e);
       this._recognition = null;
     }
   }
@@ -108,9 +111,6 @@ class VoiceManager {
 
     return new Promise((resolve) => {
       this._cancelTTS();
-
-      const sentences = text.match(/[^。！？\n]+[。！？\n]?/g) || [text];
-      let idx = 0;
       let settled = false;
 
       const done = () => {
@@ -121,39 +121,27 @@ class VoiceManager {
         resolve();
       };
 
-      // Watchdog: iOS can silently pause synthesis; resume every 250ms.
-      // Also triggers done() if synthesis finishes without firing onend.
+      // Watchdog: iOS can silently pause synthesis – resume every 250ms.
+      // Does NOT call done() to avoid false-positive between chunks.
       this._ttsTimer = setInterval(() => {
-        if (!this.synth) { done(); return; }
-        if (this.synth.paused) this.synth.resume();
-        if (!this.synth.speaking && !this.synth.pending) done();
+        if (this.synth && this.synth.paused) this.synth.resume();
       }, 250);
 
-      // Hard timeout: give at most (chars * 120ms + 6s) before giving up
-      const maxMs = Math.max(text.length * 120, 6000);
-      setTimeout(done, maxMs);
+      // Hard timeout: chars × 120ms + 8s buffer
+      setTimeout(done, Math.max(text.length * 120, 8000));
 
-      const speakNext = () => {
-        if (settled || idx >= sentences.length) { done(); return; }
+      // Speak the full text as a single utterance to avoid inter-chunk gaps
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.lang   = 'ja-JP';
+      utt.rate   = 1.05;
+      utt.pitch  = 1.1;
+      utt.volume = 1.0;
+      if (this._jaVoice) utt.voice = this._jaVoice;
 
-        const utt = new SpeechSynthesisUtterance(sentences[idx]);
-        utt.lang   = 'ja-JP';
-        utt.rate   = 1.05;
-        utt.pitch  = 1.1;
-        utt.volume = 1.0;
-        if (this._jaVoice) utt.voice = this._jaVoice;
-
-        if (idx === 0 && this._onTTSStart) this._onTTSStart();
-
-        utt.onend   = () => { idx++; speakNext(); };
-        utt.onerror = (e) => {
-          console.warn('TTS sentence error:', e.error);
-          idx++;
-          speakNext();
-        };
-        this.synth.speak(utt);
-      };
-      speakNext();
+      if (this._onTTSStart) this._onTTSStart();
+      utt.onend   = done;
+      utt.onerror = (e) => { console.warn('TTS error:', e.error); done(); };
+      this.synth.speak(utt);
     });
   }
 
