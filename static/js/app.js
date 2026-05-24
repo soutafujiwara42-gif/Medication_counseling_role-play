@@ -297,6 +297,15 @@ async function sendMessage() {
   const typingEl = addTypingIndicator();
   setAvatarState('thinking');
 
+  // iOS Safari requires speechSynthesis to be called from a user-gesture context.
+  // Speak a silent utterance here (we are still inside the tap/click handler)
+  // to unlock the audio session before the async fetch completes.
+  if (voice.synth && voice.voiceOutput) {
+    const unlock = new SpeechSynthesisUtterance(' ');
+    unlock.volume = 0; unlock.rate = 10;
+    voice.synth.speak(unlock);
+  }
+
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
