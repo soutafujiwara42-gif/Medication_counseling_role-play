@@ -128,9 +128,13 @@ class VoiceManager {
     this._stopCurrentSource();
 
     return new Promise((resolve) => {
+      const gain = this._audioCtx.createGain();
+      gain.gain.value = 2.5;          // amplify edge-tts output for iOS
+
       const source = this._audioCtx.createBufferSource();
       source.buffer = audioBuffer;
-      source.connect(this._audioCtx.destination);
+      source.connect(gain);
+      gain.connect(this._audioCtx.destination);
       this._currentSource = source;
 
       if (this._onTTSStart) this._onTTSStart();
