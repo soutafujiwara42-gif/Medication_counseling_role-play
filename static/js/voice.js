@@ -1,14 +1,16 @@
 'use strict';
 /**
- * VoiceManager – Web Speech API wrapper with iOS Safari fixes.
+ * VoiceManager – Web Speech API wrapper with iOS Safari workarounds.
  *
  * iOS quirks addressed:
  *  - SpeechRecognition recreated each session (reuse causes double-end events)
- *  - 'aborted' STT error ignored (iOS fires it before onend on stop())
- *  - TTS watchdog calls synth.resume() every 250ms (iOS silently pauses on bg/lock)
+ *  - 'aborted' STT error ignored (iOS fires it before onend when stop() is called)
+ *  - synth.cancel() followed immediately by synth.speak() silently fails on iOS:
+ *    only cancel when something is actually speaking/pending, and add 150ms delay
+ *  - TTS watchdog: resume() every 250ms in case iOS silently pauses synthesis
  *  - Hard timeout resolves speak() if onend never fires
- *  - No sentence splitting: single utterance avoids inter-chunk gaps that
- *    triggered false watchdog "done" between chunks
+ *  - unlockAudio(): speak a near-silent utterance in a gesture handler to open
+ *    the iOS audio session before the async fetch completes
  */
 class VoiceManager {
   constructor() {
@@ -41,13 +43,25 @@ class VoiceManager {
       };
       pick();
       this.synth.onvoiceschanged = pick;
-      // iOS sometimes doesn't fire onvoiceschanged – retry
       setTimeout(pick, 500);
       setTimeout(pick, 2000);
     }
   }
 
   get available() { return !!this._SR; }
+
+  // ── iOS audio session unlock ─────────────────────────────────────────────────
+  // Call this synchronously inside a user-gesture handler (tap/click).
+  // Queues a near-silent utterance to open the iOS audio session so that
+  // the subsequent async speak() call is not blocked.
+  unlockAudio() {
+    if (!this.synth || !this.voiceOutput) return;
+    const u = new SpeechSynthesisUtterance('あ');
+    u.volume = 0.01;
+    u.rate   = 10;
+    u.lang   = 'ja-JP';
+    this.synth.speak(u);
+  }
 
   // ── STT ─────────────────────────────────────────────────────────────────────
 
@@ -72,8 +86,7 @@ class VoiceManager {
       if (this._onEnd) this._onEnd();
     };
     r.onerror = (e) => {
-      // iOS fires 'aborted' before onend when stop() is called – ignore
-      if (e.error === 'aborted') return;
+      if (e.error === 'aborted') return; // iOS fires this before onend on stop()
       console.warn('STT error:', e.error);
       this.isRecording = false;
       this._recognition = null;
@@ -84,7 +97,7 @@ class VoiceManager {
 
   startRecording() {
     if (!this._SR || this.isRecording) return;
-    this._cancelTTS();
+    if (this.synth) this.synth.cancel();
     this._recognition = this._buildRecognition();
     try {
       this._recognition.start();
@@ -101,54 +114,65 @@ class VoiceManager {
 
   // ── TTS ─────────────────────────────────────────────────────────────────────
 
-  _cancelTTS() {
+  _clearTTSTimer() {
     if (this._ttsTimer) { clearInterval(this._ttsTimer); this._ttsTimer = null; }
-    if (this.synth)     this.synth.cancel();
   }
 
   speak(text) {
     if (!this.synth || !this.voiceOutput) return Promise.resolve();
 
     return new Promise((resolve) => {
-      this._cancelTTS();
+      this._clearTTSTimer();
       let settled = false;
 
       const done = () => {
         if (settled) return;
         settled = true;
-        this._cancelTTS();
+        this._clearTTSTimer();
         if (this._onTTSEnd) this._onTTSEnd();
         resolve();
       };
 
-      // Watchdog: iOS can silently pause synthesis – resume every 250ms.
-      // Does NOT call done() to avoid false-positive between chunks.
-      this._ttsTimer = setInterval(() => {
-        if (this.synth && this.synth.paused) this.synth.resume();
-      }, 250);
+      const startUtterance = () => {
+        if (settled) return;
 
-      // Hard timeout: chars × 120ms + 8s buffer
-      setTimeout(done, Math.max(text.length * 120, 8000));
+        // Watchdog: resume every 250ms in case iOS silently pauses synthesis
+        this._ttsTimer = setInterval(() => {
+          if (this.synth && this.synth.paused) this.synth.resume();
+        }, 250);
 
-      // Speak the full text as a single utterance to avoid inter-chunk gaps
-      const utt = new SpeechSynthesisUtterance(text);
-      utt.lang   = 'ja-JP';
-      utt.rate   = 1.05;
-      utt.pitch  = 1.1;
-      utt.volume = 1.0;
-      if (this._jaVoice) utt.voice = this._jaVoice;
+        // Hard timeout: chars × 120ms + 8s buffer
+        setTimeout(done, Math.max(text.length * 120, 8000));
 
-      if (this._onTTSStart) this._onTTSStart();
-      utt.onend   = done;
-      utt.onerror = (e) => { console.warn('TTS error:', e.error); done(); };
-      this.synth.speak(utt);
+        const utt = new SpeechSynthesisUtterance(text);
+        utt.lang   = 'ja-JP';
+        utt.rate   = 1.05;
+        utt.pitch  = 1.1;
+        utt.volume = 1.0;
+        if (this._jaVoice) utt.voice = this._jaVoice;
+
+        if (this._onTTSStart) this._onTTSStart();
+        utt.onend   = done;
+        utt.onerror = (e) => { console.warn('TTS error:', e.error); done(); };
+        this.synth.speak(utt);
+      };
+
+      // iOS bug: cancel() followed immediately by speak() silently fails.
+      // Only cancel if something is actually playing/queued, then wait 150ms.
+      if (this.synth.speaking || this.synth.pending) {
+        this.synth.cancel();
+        setTimeout(startUtterance, 150);
+      } else {
+        startUtterance();
+      }
     });
   }
 
   // ── Misc ────────────────────────────────────────────────────────────────────
 
   stop() {
-    this._cancelTTS();
+    this._clearTTSTimer();
+    if (this.synth) this.synth.cancel();
     this.stopRecording();
   }
 
