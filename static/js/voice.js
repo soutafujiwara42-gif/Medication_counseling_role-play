@@ -2,19 +2,17 @@
 /**
  * VoiceManager – Web Speech API wrapper with iOS Safari workarounds.
  *
- * iOS TTS restriction: speak() must be called from a synchronous user-gesture
- * context. After `await fetch()` we are no longer in that context.
- *
- * Fix: in the gesture handler call unlockAudio(), which queues a near-silent
- * primer utterance. That call IS in the gesture context, so iOS opens the
- * audio session. When the real speak() is called later (async), we simply
- * add to the queue WITHOUT cancelling – iOS allows queuing once the session
- * is open. The primer (rate=10, "あ") finishes in milliseconds.
+ * iOS audio session rule: speak() called from an async context (after await fetch)
+ * is silently blocked UNLESS the audio session is still "active" from a prior
+ * user-gesture call. A 0.01-volume utterance of ~30s duration ("あ" × 80, rate=0.1)
+ * is queued synchronously in the gesture handler. By the time the reply arrives,
+ * the keep-alive is still running → session is active. We then cancel() and speak()
+ * the real text (iOS reliably allows speak() when cancelling an active session).
  *
  * Other iOS quirks:
  *  - SpeechRecognition recreated each session (reuse causes double-end events)
  *  - 'aborted' STT error ignored (fires before onend when stop() is called)
- *  - Watchdog resumes paused synthesis every 250ms (iOS pauses on lock/bg)
+ *  - Watchdog: resume() every 250ms in case iOS silently pauses synthesis
  *  - Hard timeout resolves speak() if onend never fires
  */
 class VoiceManager {
@@ -26,10 +24,10 @@ class VoiceManager {
     this.voiceInput  = true;
     this.voiceOutput = true;
     this.isRecording = false;
-    this._recognition = null;
-    this._jaVoice    = null;
-    this._ttsTimer   = null;
-    this._primerPending = false; // true after unlockAudio(), cleared on speak()
+    this._recognition  = null;
+    this._jaVoice      = null;
+    this._ttsTimer     = null;
+    this._keepAliveUtterance = null;
 
     this._onResult   = null;
     this._onStart    = null;
@@ -46,6 +44,7 @@ class VoiceManager {
           vs.find(v => v.lang === 'ja-JP') ||
           vs.find(v => v.lang.startsWith('ja')) ||
           null;
+        console.log('[Voice] selected voice:', this._jaVoice ? this._jaVoice.name : 'none');
       };
       pick();
       this.synth.onvoiceschanged = pick;
@@ -56,17 +55,22 @@ class VoiceManager {
 
   get available() { return !!this._SR; }
 
-  // ── iOS audio session unlock ─────────────────────────────────────────────────
+  // ── iOS audio session keep-alive ─────────────────────────────────────────────
   // MUST be called synchronously inside a tap/click handler.
-  // Queues a near-silent utterance to open the iOS audio session.
+  // Speaks a ~30s near-silent utterance to hold the iOS audio session open
+  // while the network request is in flight.
   unlockAudio() {
     if (!this.synth || !this.voiceOutput) return;
-    const u = new SpeechSynthesisUtterance('あ');
+    // Cancel any stale keep-alive first
+    this.synth.cancel();
+    const u = new SpeechSynthesisUtterance('あ'.repeat(80));
     u.volume = 0.01;
-    u.rate   = 10;
+    u.rate   = 0.1;   // ~30 seconds – well beyond any network round-trip
     u.lang   = 'ja-JP';
+    if (this._jaVoice) u.voice = this._jaVoice;
+    this._keepAliveUtterance = u;
     this.synth.speak(u);
-    this._primerPending = true;
+    console.log('[Voice] keep-alive started, synth.speaking=', this.synth.speaking, 'pending=', this.synth.pending);
   }
 
   // ── STT ─────────────────────────────────────────────────────────────────────
@@ -92,8 +96,8 @@ class VoiceManager {
       if (this._onEnd) this._onEnd();
     };
     r.onerror = (e) => {
-      if (e.error === 'aborted') return; // iOS fires before onend on stop()
-      console.warn('STT error:', e.error);
+      if (e.error === 'aborted') return;
+      console.warn('[Voice] STT error:', e.error);
       this.isRecording = false;
       this._recognition = null;
       if (this._onEnd) this._onEnd();
@@ -104,12 +108,12 @@ class VoiceManager {
   startRecording() {
     if (!this._SR || this.isRecording) return;
     if (this.synth) this.synth.cancel();
-    this._primerPending = false;
+    this._keepAliveUtterance = null;
     this._recognition = this._buildRecognition();
     try {
       this._recognition.start();
     } catch (e) {
-      console.warn('STT start:', e);
+      console.warn('[Voice] STT start:', e);
       this._recognition = null;
     }
   }
@@ -136,19 +140,22 @@ class VoiceManager {
         if (settled) return;
         settled = true;
         this._clearTTSTimer();
+        console.log('[Voice] TTS done');
         if (this._onTTSEnd) this._onTTSEnd();
         resolve();
       };
 
-      const queueUtterance = () => {
+      const startUtterance = () => {
         if (settled) return;
+        console.log('[Voice] speak() starting utterance, speaking=', this.synth.speaking, 'pending=', this.synth.pending);
 
-        // Watchdog: iOS can silently pause synthesis
         this._ttsTimer = setInterval(() => {
-          if (this.synth && this.synth.paused) this.synth.resume();
+          if (this.synth && this.synth.paused) {
+            console.log('[Voice] watchdog: resuming paused synth');
+            this.synth.resume();
+          }
         }, 250);
 
-        // Hard timeout failsafe
         setTimeout(done, Math.max(text.length * 120, 8000));
 
         const utt = new SpeechSynthesisUtterance(text);
@@ -158,24 +165,25 @@ class VoiceManager {
         utt.volume = 1.0;
         if (this._jaVoice) utt.voice = this._jaVoice;
 
+        utt.onstart = () => console.log('[Voice] utterance started');
         if (this._onTTSStart) this._onTTSStart();
         utt.onend   = done;
-        utt.onerror = (e) => { console.warn('TTS error:', e.error); done(); };
+        utt.onerror = (e) => { console.warn('[Voice] utterance error:', e.error); done(); };
         this.synth.speak(utt);
       };
 
-      if (this._primerPending) {
-        // Audio session is open from unlockAudio() – queue directly without cancel.
-        // The primer ("あ" at rate=10) is already done or finishing; our utterance
-        // plays right after it in the queue.
-        this._primerPending = false;
-        queueUtterance();
-      } else if (this.synth.speaking || this.synth.pending) {
-        // Something else is playing – cancel it, then wait for iOS to settle
+      if (this._keepAliveUtterance) {
+        // Keep-alive is (or was) running – cancel it now so the session is
+        // still considered "active", then speak after a short settle delay.
+        console.log('[Voice] cancelling keep-alive, speaking=', this.synth.speaking);
+        this._keepAliveUtterance = null;
         this.synth.cancel();
-        setTimeout(queueUtterance, 150);
+        setTimeout(startUtterance, 150);
+      } else if (this.synth.speaking || this.synth.pending) {
+        this.synth.cancel();
+        setTimeout(startUtterance, 150);
       } else {
-        queueUtterance();
+        startUtterance();
       }
     });
   }
@@ -185,7 +193,7 @@ class VoiceManager {
   stop() {
     this._clearTTSTimer();
     if (this.synth) this.synth.cancel();
-    this._primerPending = false;
+    this._keepAliveUtterance = null;
     this.stopRecording();
   }
 
