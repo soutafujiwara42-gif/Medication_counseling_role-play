@@ -2,16 +2,12 @@
 /**
  * VoiceManager
  *
- * TTS: uses server-generated audio (edge-tts, returned as base64 MP3) played
- *      via an <audio> element. This bypasses iOS Safari's speechSynthesis
- *      restrictions entirely.
+ * TTS: AudioContext (Web Audio API) で MP3 を再生。
+ *      <audio>.play() は src 変更のたびに iOS のアクティベーションが失効するが、
+ *      AudioContext はジェスチャーで一度 resume() すれば非同期から永続的に使える。
  *
- * STT: Web Speech API (webkitSpeechRecognition) with iOS workarounds:
- *  - Recreate recognition instance each session
- *  - Ignore 'aborted' error (fires before onend on stop())
- *
- * iOS <audio> unlock: call unlockAudio() synchronously inside a tap handler
- * to "prime" the audio element. After that, async play() calls work.
+ * STT: Web Speech API (webkitSpeechRecognition)
+ *      iOS quirks: インスタンス再生成・'aborted' エラー無視
  */
 class VoiceManager {
   constructor() {
@@ -21,11 +17,9 @@ class VoiceManager {
     this.voiceInput  = true;
     this.voiceOutput = true;
     this.isRecording = false;
-    this._recognition = null;
-
-    // Single reusable <audio> element for TTS
-    this._audio = new Audio();
-    this._audio.preload = 'none';
+    this._recognition   = null;
+    this._audioCtx      = null;
+    this._currentSource = null;
 
     this._onResult   = null;
     this._onStart    = null;
@@ -36,18 +30,19 @@ class VoiceManager {
 
   get available() { return !!this._SR; }
 
-  // ── iOS <audio> unlock ───────────────────────────────────────────────────────
-  // MUST be called synchronously inside a tap/click handler.
-  // Plays a 1-sample silent WAV to activate the audio element under iOS's
-  // user-gesture policy. Subsequent async play() calls on the same element work.
+  // ── AudioContext unlock (ジェスチャーハンドラ内で呼ぶ) ─────────────────────
   unlockAudio() {
     if (!this.voiceOutput) return;
-    const SILENT_WAV = 'data:audio/wav;base64,UklGRiUAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQEAAACA';
-    this._audio.src = SILENT_WAV;
-    this._audio.play().catch(() => {});
+    if (!this._audioCtx) {
+      this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    // suspended 状態ならジェスチャーコンテキスト内で resume
+    if (this._audioCtx.state === 'suspended') {
+      this._audioCtx.resume();
+    }
   }
 
-  // ── STT ─────────────────────────────────────────────────────────────────────
+  // ── STT ────────────────────────────────────────────────────────────────────
 
   _buildRecognition() {
     const r = new this._SR();
@@ -69,7 +64,7 @@ class VoiceManager {
       if (this._onEnd) this._onEnd();
     };
     r.onerror = (e) => {
-      if (e.error === 'aborted') return; // iOS fires before onend on stop()
+      if (e.error === 'aborted') return;
       console.warn('[Voice] STT error:', e.error);
       this.isRecording = false;
       this._recognition = null;
@@ -80,7 +75,7 @@ class VoiceManager {
 
   startRecording() {
     if (!this._SR || this.isRecording) return;
-    this._audio.pause();
+    this._stopCurrentSource();
     this._recognition = this._buildRecognition();
     try {
       this._recognition.start();
@@ -95,41 +90,64 @@ class VoiceManager {
     try { this._recognition.stop(); } catch (e) { console.warn(e); }
   }
 
-  // ── TTS (server-side audio) ──────────────────────────────────────────────────
-  // base64Data: base64-encoded MP3 returned by /api/chat
-  speakAudio(base64Data) {
-    if (!base64Data || !this.voiceOutput) return Promise.resolve();
+  // ── TTS (AudioContext で base64 MP3 を再生) ─────────────────────────────────
+
+  _stopCurrentSource() {
+    if (this._currentSource) {
+      try { this._currentSource.stop(); } catch (_) {}
+      this._currentSource = null;
+    }
+  }
+
+  async speakAudio(base64Data) {
+    if (!base64Data || !this.voiceOutput) return;
+
+    // AudioContext が未初期化なら作る（既に resume 済みなら再利用）
+    if (!this._audioCtx) {
+      this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (this._audioCtx.state === 'suspended') {
+      await this._audioCtx.resume();
+    }
+
+    // base64 → ArrayBuffer
+    const binary = atob(base64Data);
+    const buf    = new ArrayBuffer(binary.length);
+    const view   = new Uint8Array(buf);
+    for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i);
+
+    let audioBuffer;
+    try {
+      audioBuffer = await this._audioCtx.decodeAudioData(buf);
+    } catch (err) {
+      console.warn('[Voice] decodeAudioData error:', err);
+      if (this._onTTSEnd) this._onTTSEnd();
+      return;
+    }
+
+    this._stopCurrentSource();
 
     return new Promise((resolve) => {
-      const binary = atob(base64Data);
-      const bytes  = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: 'audio/mpeg' });
-      const url  = URL.createObjectURL(blob);
+      const source = this._audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(this._audioCtx.destination);
+      this._currentSource = source;
 
-      const cleanup = () => {
-        URL.revokeObjectURL(url);
+      if (this._onTTSStart) this._onTTSStart();
+
+      source.onended = () => {
+        this._currentSource = null;
         if (this._onTTSEnd) this._onTTSEnd();
         resolve();
       };
-
-      this._audio.onended  = cleanup;
-      this._audio.onerror  = () => { console.warn('[Voice] audio error'); cleanup(); };
-      this._audio.src = url;
-
-      if (this._onTTSStart) this._onTTSStart();
-      this._audio.play().catch((err) => {
-        console.warn('[Voice] play() rejected:', err);
-        cleanup();
-      });
+      source.start(0);
     });
   }
 
-  // ── Misc ────────────────────────────────────────────────────────────────────
+  // ── Misc ───────────────────────────────────────────────────────────────────
 
   stop() {
-    this._audio.pause();
-    this._audio.src = '';
+    this._stopCurrentSource();
     this.stopRecording();
   }
 
