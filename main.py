@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional
 import anthropic
+from anthropic import AsyncAnthropic
 import edge_tts
 import pandas as pd
 from pathlib import Path
@@ -16,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="服薬指導ロープレエージェント", version="1.0.0")
 
-MODEL_ID = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
-client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+MODEL_ID = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 
 def load_drugs() -> pd.DataFrame:
@@ -176,7 +177,7 @@ async def chat(req: ChatRequest):
     messages.append({"role": "user", "content": req.message})
 
     try:
-        response = client.messages.create(
+        response = await client.messages.create(
             model=MODEL_ID,
             max_tokens=200,
             system=system_prompt,
