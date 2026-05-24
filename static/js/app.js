@@ -24,7 +24,6 @@ const prescList       = $('prescription-list');
 const prescEmpty      = $('prescription-empty');
 const modelBadge      = $('model-name');
 const avatarStatus    = $('avatar-status-text');
-const avatarRing      = $('avatar-status-ring');
 const personalityDisp = $('personality-display');
 const voiceOutToggle  = $('voice-out-toggle');
 const voiceInToggle   = $('voice-in-toggle');
@@ -42,8 +41,7 @@ const presetSelect = $('preset-select');
 const presetName   = $('preset-name-input');
 
 // ── Subsystems ──────────────────────────────────────────────────────────────
-const voice  = new VoiceManager();
-const avatar = new PatientAvatar('avatar-canvas');
+const voice = new VoiceManager();
 
 // ── Init ────────────────────────────────────────────────────────────────────
 async function init() {
@@ -379,9 +377,6 @@ function scrollToBottom() {
 }
 
 function setAvatarState(s) {
-  avatar.setState(s);
-  avatarRing.className = s;
-  avatarRing.id = 'avatar-status-ring';
   const labels = { idle: '待機中', listening: '聞いています…', speaking: '話しています…', thinking: '考え中…' };
   avatarStatus.textContent = labels[s] || s;
 }

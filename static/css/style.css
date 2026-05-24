@@ -267,48 +267,15 @@ body {
   background: var(--bg);
 }
 
-/* Avatar + Status strip */
+/* Status strip */
 #avatar-strip {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 12px 20px;
+  gap: 12px;
+  padding: 10px 20px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-}
-
-#avatar-canvas-wrap {
-  position: relative;
-  flex-shrink: 0;
-}
-
-#avatar-canvas {
-  border-radius: 50%;
-  display: block;
-  box-shadow: 0 2px 12px rgba(0,0,0,.15);
-}
-
-#avatar-status-ring {
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  border: 3px solid transparent;
-  transition: border-color .3s;
-  pointer-events: none;
-}
-#avatar-status-ring.idle    { border-color: transparent; }
-#avatar-status-ring.listening { border-color: var(--primary); animation: spin-ring 2s linear infinite; }
-#avatar-status-ring.speaking  { border-color: var(--success); animation: glow-ring 0.5s ease-in-out infinite alternate; }
-#avatar-status-ring.thinking  { border-color: var(--warning); animation: spin-ring 1.5s linear infinite; }
-
-@keyframes spin-ring {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
-@keyframes glow-ring {
-  from { box-shadow: 0 0 6px var(--success); }
-  to   { box-shadow: 0 0 18px var(--success); }
 }
 
 #avatar-info { flex: 1; }

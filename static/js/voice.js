@@ -2,15 +2,20 @@
 /**
  * VoiceManager – Web Speech API wrapper with iOS Safari workarounds.
  *
- * iOS quirks addressed:
+ * iOS TTS restriction: speak() must be called from a synchronous user-gesture
+ * context. After `await fetch()` we are no longer in that context.
+ *
+ * Fix: in the gesture handler call unlockAudio(), which queues a near-silent
+ * primer utterance. That call IS in the gesture context, so iOS opens the
+ * audio session. When the real speak() is called later (async), we simply
+ * add to the queue WITHOUT cancelling – iOS allows queuing once the session
+ * is open. The primer (rate=10, "あ") finishes in milliseconds.
+ *
+ * Other iOS quirks:
  *  - SpeechRecognition recreated each session (reuse causes double-end events)
- *  - 'aborted' STT error ignored (iOS fires it before onend when stop() is called)
- *  - synth.cancel() followed immediately by synth.speak() silently fails on iOS:
- *    only cancel when something is actually speaking/pending, and add 150ms delay
- *  - TTS watchdog: resume() every 250ms in case iOS silently pauses synthesis
+ *  - 'aborted' STT error ignored (fires before onend when stop() is called)
+ *  - Watchdog resumes paused synthesis every 250ms (iOS pauses on lock/bg)
  *  - Hard timeout resolves speak() if onend never fires
- *  - unlockAudio(): speak a near-silent utterance in a gesture handler to open
- *    the iOS audio session before the async fetch completes
  */
 class VoiceManager {
   constructor() {
@@ -24,6 +29,7 @@ class VoiceManager {
     this._recognition = null;
     this._jaVoice    = null;
     this._ttsTimer   = null;
+    this._primerPending = false; // true after unlockAudio(), cleared on speak()
 
     this._onResult   = null;
     this._onStart    = null;
@@ -51,9 +57,8 @@ class VoiceManager {
   get available() { return !!this._SR; }
 
   // ── iOS audio session unlock ─────────────────────────────────────────────────
-  // Call this synchronously inside a user-gesture handler (tap/click).
-  // Queues a near-silent utterance to open the iOS audio session so that
-  // the subsequent async speak() call is not blocked.
+  // MUST be called synchronously inside a tap/click handler.
+  // Queues a near-silent utterance to open the iOS audio session.
   unlockAudio() {
     if (!this.synth || !this.voiceOutput) return;
     const u = new SpeechSynthesisUtterance('あ');
@@ -61,6 +66,7 @@ class VoiceManager {
     u.rate   = 10;
     u.lang   = 'ja-JP';
     this.synth.speak(u);
+    this._primerPending = true;
   }
 
   // ── STT ─────────────────────────────────────────────────────────────────────
@@ -86,7 +92,7 @@ class VoiceManager {
       if (this._onEnd) this._onEnd();
     };
     r.onerror = (e) => {
-      if (e.error === 'aborted') return; // iOS fires this before onend on stop()
+      if (e.error === 'aborted') return; // iOS fires before onend on stop()
       console.warn('STT error:', e.error);
       this.isRecording = false;
       this._recognition = null;
@@ -98,6 +104,7 @@ class VoiceManager {
   startRecording() {
     if (!this._SR || this.isRecording) return;
     if (this.synth) this.synth.cancel();
+    this._primerPending = false;
     this._recognition = this._buildRecognition();
     try {
       this._recognition.start();
@@ -133,15 +140,15 @@ class VoiceManager {
         resolve();
       };
 
-      const startUtterance = () => {
+      const queueUtterance = () => {
         if (settled) return;
 
-        // Watchdog: resume every 250ms in case iOS silently pauses synthesis
+        // Watchdog: iOS can silently pause synthesis
         this._ttsTimer = setInterval(() => {
           if (this.synth && this.synth.paused) this.synth.resume();
         }, 250);
 
-        // Hard timeout: chars × 120ms + 8s buffer
+        // Hard timeout failsafe
         setTimeout(done, Math.max(text.length * 120, 8000));
 
         const utt = new SpeechSynthesisUtterance(text);
@@ -157,13 +164,18 @@ class VoiceManager {
         this.synth.speak(utt);
       };
 
-      // iOS bug: cancel() followed immediately by speak() silently fails.
-      // Only cancel if something is actually playing/queued, then wait 150ms.
-      if (this.synth.speaking || this.synth.pending) {
+      if (this._primerPending) {
+        // Audio session is open from unlockAudio() – queue directly without cancel.
+        // The primer ("あ" at rate=10) is already done or finishing; our utterance
+        // plays right after it in the queue.
+        this._primerPending = false;
+        queueUtterance();
+      } else if (this.synth.speaking || this.synth.pending) {
+        // Something else is playing – cancel it, then wait for iOS to settle
         this.synth.cancel();
-        setTimeout(startUtterance, 150);
+        setTimeout(queueUtterance, 150);
       } else {
-        startUtterance();
+        queueUtterance();
       }
     });
   }
@@ -173,6 +185,7 @@ class VoiceManager {
   stop() {
     this._clearTTSTimer();
     if (this.synth) this.synth.cancel();
+    this._primerPending = false;
     this.stopRecording();
   }
 
