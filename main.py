@@ -1,10 +1,13 @@
 import os
+import io
+import base64
 import logging
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import anthropic
+import edge_tts
 import pandas as pd
 from pathlib import Path
 
@@ -179,8 +182,24 @@ def chat(req: ChatRequest):
             system=system_prompt,
             messages=messages,
         )
+        reply = response.content[0].text
+
+        # Generate TTS audio with edge-tts (server-side, works on iOS Safari)
+        audio_b64: Optional[str] = None
+        try:
+            communicate = edge_tts.Communicate(reply, "ja-JP-NanamiNeural")
+            buf = io.BytesIO()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    buf.write(chunk["data"])
+            if buf.tell() > 0:
+                audio_b64 = base64.b64encode(buf.getvalue()).decode()
+        except Exception as tts_err:
+            logger.warning(f"edge-tts エラー（音声なしで続行）: {tts_err}")
+
         return {
-            "reply": response.content[0].text,
+            "reply": reply,
+            "audio": audio_b64,
             "model": MODEL_ID,
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,

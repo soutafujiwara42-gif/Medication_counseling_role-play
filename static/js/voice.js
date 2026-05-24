@@ -1,79 +1,50 @@
 'use strict';
 /**
- * VoiceManager – Web Speech API wrapper with iOS Safari workarounds.
+ * VoiceManager
  *
- * iOS audio session rule: speak() called from an async context (after await fetch)
- * is silently blocked UNLESS the audio session is still "active" from a prior
- * user-gesture call. A 0.01-volume utterance of ~30s duration ("あ" × 80, rate=0.1)
- * is queued synchronously in the gesture handler. By the time the reply arrives,
- * the keep-alive is still running → session is active. We then cancel() and speak()
- * the real text (iOS reliably allows speak() when cancelling an active session).
+ * TTS: uses server-generated audio (edge-tts, returned as base64 MP3) played
+ *      via an <audio> element. This bypasses iOS Safari's speechSynthesis
+ *      restrictions entirely.
  *
- * Other iOS quirks:
- *  - SpeechRecognition recreated each session (reuse causes double-end events)
- *  - 'aborted' STT error ignored (fires before onend when stop() is called)
- *  - Watchdog: resume() every 250ms in case iOS silently pauses synthesis
- *  - Hard timeout resolves speak() if onend never fires
+ * STT: Web Speech API (webkitSpeechRecognition) with iOS workarounds:
+ *  - Recreate recognition instance each session
+ *  - Ignore 'aborted' error (fires before onend on stop())
+ *
+ * iOS <audio> unlock: call unlockAudio() synchronously inside a tap handler
+ * to "prime" the audio element. After that, async play() calls work.
  */
 class VoiceManager {
   constructor() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     this._SR  = SR || null;
-    this.synth = window.speechSynthesis;
 
     this.voiceInput  = true;
     this.voiceOutput = true;
     this.isRecording = false;
-    this._recognition  = null;
-    this._jaVoice      = null;
-    this._ttsTimer     = null;
-    this._keepAliveUtterance = null;
+    this._recognition = null;
+
+    // Single reusable <audio> element for TTS
+    this._audio = new Audio();
+    this._audio.preload = 'none';
 
     this._onResult   = null;
     this._onStart    = null;
     this._onEnd      = null;
     this._onTTSStart = null;
     this._onTTSEnd   = null;
-
-    if (this.synth) {
-      const pick = () => {
-        const vs = this.synth.getVoices();
-        if (!vs.length) return;
-        this._jaVoice =
-          vs.find(v => v.lang === 'ja-JP' && /female|kyoko|haruka/i.test(v.name)) ||
-          vs.find(v => v.lang === 'ja-JP') ||
-          vs.find(v => v.lang.startsWith('ja')) ||
-          null;
-        console.log('[Voice] selected voice:', this._jaVoice ? this._jaVoice.name : 'none');
-      };
-      pick();
-      this.synth.onvoiceschanged = pick;
-      setTimeout(pick, 500);
-      setTimeout(pick, 2000);
-    }
   }
 
   get available() { return !!this._SR; }
 
-  // ── iOS audio session keep-alive ─────────────────────────────────────────────
+  // ── iOS <audio> unlock ───────────────────────────────────────────────────────
   // MUST be called synchronously inside a tap/click handler.
-  // Speaks a ~30s near-silent utterance to hold the iOS audio session open
-  // while the network request is in flight.
+  // Plays a 1-sample silent WAV to activate the audio element under iOS's
+  // user-gesture policy. Subsequent async play() calls on the same element work.
   unlockAudio() {
-    if (!this.synth || !this.voiceOutput) return;
-    // Do NOT call synth.cancel() before speak() – even in gesture context,
-    // cancel() → speak() in the same call stack is rejected by iOS.
-    const u = new SpeechSynthesisUtterance('あいうえおかきくけこさしすせそ'.repeat(6));
-    u.volume = 0.01;
-    u.rate   = 0.1;   // ~30 seconds – well beyond any network round-trip
-    u.lang   = 'ja-JP';
-    // Don't set a specific voice: a named voice that isn't fully loaded
-    // can cause silent rejection on iOS.
-    this._keepAliveUtterance = u;
-    this.synth.speak(u);
-    console.log('[Voice] keep-alive queued, speaking=', this.synth.speaking, 'pending=', this.synth.pending);
-    setTimeout(() => console.log('[Voice] keep-alive +500ms: speaking=', this.synth.speaking, 'pending=', this.synth.pending), 500);
-    setTimeout(() => console.log('[Voice] keep-alive +1500ms: speaking=', this.synth.speaking, 'pending=', this.synth.pending), 1500);
+    if (!this.voiceOutput) return;
+    const SILENT_WAV = 'data:audio/wav;base64,UklGRiUAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQEAAACA';
+    this._audio.src = SILENT_WAV;
+    this._audio.play().catch(() => {});
   }
 
   // ── STT ─────────────────────────────────────────────────────────────────────
@@ -86,8 +57,7 @@ class VoiceManager {
     r.maxAlternatives = 1;
 
     r.onresult = (e) => {
-      const text = e.results[0][0].transcript;
-      if (this._onResult) this._onResult(text);
+      if (this._onResult) this._onResult(e.results[0][0].transcript);
     };
     r.onstart = () => {
       this.isRecording = true;
@@ -99,7 +69,7 @@ class VoiceManager {
       if (this._onEnd) this._onEnd();
     };
     r.onerror = (e) => {
-      if (e.error === 'aborted') return;
+      if (e.error === 'aborted') return; // iOS fires before onend on stop()
       console.warn('[Voice] STT error:', e.error);
       this.isRecording = false;
       this._recognition = null;
@@ -110,8 +80,7 @@ class VoiceManager {
 
   startRecording() {
     if (!this._SR || this.isRecording) return;
-    if (this.synth) this.synth.cancel();
-    this._keepAliveUtterance = null;
+    this._audio.pause();
     this._recognition = this._buildRecognition();
     try {
       this._recognition.start();
@@ -126,83 +95,41 @@ class VoiceManager {
     try { this._recognition.stop(); } catch (e) { console.warn(e); }
   }
 
-  // ── TTS ─────────────────────────────────────────────────────────────────────
-
-  _clearTTSTimer() {
-    if (this._ttsTimer) { clearInterval(this._ttsTimer); this._ttsTimer = null; }
-  }
-
-  speak(text) {
-    if (!this.synth || !this.voiceOutput) return Promise.resolve();
+  // ── TTS (server-side audio) ──────────────────────────────────────────────────
+  // base64Data: base64-encoded MP3 returned by /api/chat
+  speakAudio(base64Data) {
+    if (!base64Data || !this.voiceOutput) return Promise.resolve();
 
     return new Promise((resolve) => {
-      this._clearTTSTimer();
-      let settled = false;
+      const binary = atob(base64Data);
+      const bytes  = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'audio/mpeg' });
+      const url  = URL.createObjectURL(blob);
 
-      const done = () => {
-        if (settled) return;
-        settled = true;
-        this._clearTTSTimer();
-        console.log('[Voice] TTS done');
+      const cleanup = () => {
+        URL.revokeObjectURL(url);
         if (this._onTTSEnd) this._onTTSEnd();
         resolve();
       };
 
-      const startUtterance = () => {
-        if (settled) return;
-        console.log('[Voice] speak() starting utterance, speaking=', this.synth.speaking, 'pending=', this.synth.pending);
+      this._audio.onended  = cleanup;
+      this._audio.onerror  = () => { console.warn('[Voice] audio error'); cleanup(); };
+      this._audio.src = url;
 
-        this._ttsTimer = setInterval(() => {
-          console.log('[Voice] wd: speaking=', this.synth.speaking, 'paused=', this.synth.paused, 'pending=', this.synth.pending);
-          if (this.synth && this.synth.paused) {
-            console.log('[Voice] watchdog: resuming');
-            this.synth.resume();
-          }
-        }, 1000);
-
-        setTimeout(done, Math.max(text.length * 120, 8000));
-
-        const utt = new SpeechSynthesisUtterance(text);
-        utt.lang   = 'ja-JP';
-        utt.rate   = 1.05;
-        utt.pitch  = 1.1;
-        utt.volume = 1.0;
-        if (this._jaVoice) utt.voice = this._jaVoice;
-
-        utt.onstart = () => console.log('[Voice] utterance started');
-        if (this._onTTSStart) this._onTTSStart();
-        utt.onend   = done;
-        utt.onerror = (e) => { console.warn('[Voice] utterance error:', e.error); done(); };
-        this.synth.speak(utt);
-      };
-
-      if (this._keepAliveUtterance) {
-        console.log('[Voice] cancel keep-alive: speaking=', this.synth.speaking, 'pending=', this.synth.pending);
-        this._keepAliveUtterance = null;
-        if (this.synth.speaking || this.synth.pending) {
-          // Session is active – safe to cancel then speak
-          this.synth.cancel();
-          setTimeout(startUtterance, 150);
-        } else {
-          // Keep-alive never started (iOS rejected it) – try speaking directly
-          console.log('[Voice] keep-alive was idle, calling speak() directly');
-          startUtterance();
-        }
-      } else if (this.synth.speaking || this.synth.pending) {
-        this.synth.cancel();
-        setTimeout(startUtterance, 150);
-      } else {
-        startUtterance();
-      }
+      if (this._onTTSStart) this._onTTSStart();
+      this._audio.play().catch((err) => {
+        console.warn('[Voice] play() rejected:', err);
+        cleanup();
+      });
     });
   }
 
   // ── Misc ────────────────────────────────────────────────────────────────────
 
   stop() {
-    this._clearTTSTimer();
-    if (this.synth) this.synth.cancel();
-    this._keepAliveUtterance = null;
+    this._audio.pause();
+    this._audio.src = '';
     this.stopRecording();
   }
 

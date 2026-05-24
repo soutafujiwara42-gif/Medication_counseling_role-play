@@ -318,7 +318,7 @@ async function sendMessage() {
     state.history.push({ role: 'user',      content: text });
     state.history.push({ role: 'assistant', content: reply });
     addMessage('patient', reply);
-    if (voice.voiceOutput) await voice.speak(reply);
+    if (voice.voiceOutput && data.audio) await voice.speakAudio(data.audio);
     else setAvatarState('idle');
     // Auto-restart mic after response if voice input is enabled
     autoListen = voice.voiceInput && voice.available;
